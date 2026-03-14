@@ -20,8 +20,6 @@ npm run start
 
 - `REDIS_URL`
 - `DATABASE_URL`
-- `NEXT_PUBLIC_URL`
-- `BREVO_API_KEY`
 - `S3_BUCKET`
 - `S3_REGION`
 - `S3_URL`
@@ -34,5 +32,5 @@ npm run start
 - Consumes the `video.render` queue
 - Runs with single-job concurrency
 - Uses Puppeteer + ffmpeg to render a silent portrait 9:16 MP4
-- Uploads the MP4 to object storage and emails a direct download link
+- Uploads the MP4 to object storage and stores the download URL on the gift
 # emocia-render-worker

@@ -1,14 +1,14 @@
 export type RenderVideoJob = {
   giftCode: string
   renderUrl: string
-  recipientEmail: string
-  pendingEmails: string[]
   fps: number
   width: number
   height: number
   fingerprint: string
   outputObjectKey: string
 }
+
+export type VideoExportJob = RenderVideoJob
 
 type RenderStatus = 'idle' | 'ready' | 'started' | 'finished'
 

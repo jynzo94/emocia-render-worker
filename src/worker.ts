@@ -1,11 +1,10 @@
 import { Worker } from 'bullmq'
 
 import { config, VIDEO_RENDER_QUEUE_NAME, WORKER_CONCURRENCY } from './config.js'
-import { sendReadyEmail } from './email.js'
 import { getGiftsCollection } from './mongo.js'
 import { renderVideo } from './render.js'
 import { uploadVideoObject } from './storage.js'
-import type { RenderVideoJob } from './types.js'
+import type { VideoExportJob } from './types.js'
 
 function truncateError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
@@ -24,7 +23,7 @@ async function markGiftStatus(giftCode: string, update: Record<string, unknown>)
   await gifts.updateOne({ code: giftCode }, { $set: update })
 }
 
-export const worker = new Worker<RenderVideoJob>(
+export const worker = new Worker<VideoExportJob>(
   VIDEO_RENDER_QUEUE_NAME,
   async (job) => {
     const startedAt = Date.now()
@@ -38,13 +37,11 @@ export const worker = new Worker<RenderVideoJob>(
       attemptsMade: job.attemptsMade,
       giftCode: job.data.giftCode,
       fingerprint: job.data.fingerprint,
-      recipientEmail: job.data.recipientEmail,
     })
 
     await markGiftStatus(job.data.giftCode, {
       videoExportStatus: 'processing',
       videoExportProcessingAt: new Date(),
-      videoExportRequestedEmail: job.data.recipientEmail,
       videoExportError: null,
     })
 
@@ -74,50 +71,6 @@ export const worker = new Worker<RenderVideoJob>(
         videoExportFingerprint: job.data.fingerprint,
       })
 
-      const gifts = await getGiftsCollection()
-      const gift = await gifts.findOne(
-        { code: job.data.giftCode },
-        { projection: { videoExportPendingEmails: 1 } },
-      )
-
-      const recipients = Array.from(
-        new Set(
-          ((gift?.videoExportPendingEmails as string[] | undefined) ?? job.data.pendingEmails ?? [job.data.recipientEmail])
-            .map((email) => email.trim().toLowerCase())
-            .filter(Boolean),
-        ),
-      )
-
-      console.log({
-        ts: new Date().toISOString(),
-        level: 'info',
-        event: 'video_export.recipients_resolved',
-        jobId: job.id,
-        giftCode: job.data.giftCode,
-        recipientCount: recipients.length,
-        recipients,
-      })
-
-      const giftUrl = `${config.appBaseUrl}/gift/${encodeURIComponent(job.data.giftCode)}`
-
-      for (const recipientEmail of recipients) {
-        await sendReadyEmail({
-          recipientEmail,
-          downloadUrl,
-          giftUrl,
-        })
-      }
-
-      await gifts.updateOne(
-        { code: job.data.giftCode },
-        {
-          $set: {
-            videoExportPendingEmails: [],
-            videoExportRequestedEmail: job.data.recipientEmail,
-          },
-        },
-      )
-
       console.log({
         ts: new Date().toISOString(),
         level: 'info',
@@ -143,7 +96,6 @@ export const worker = new Worker<RenderVideoJob>(
         jobId: job.id,
         giftCode: job.data.giftCode,
         fingerprint: job.data.fingerprint,
-        recipientEmail: job.data.recipientEmail,
         durationMs: Date.now() - startedAt,
         error: error instanceof Error ? error.stack ?? error.message : String(error),
       })
@@ -168,7 +120,7 @@ worker.on('completed', (job) => {
   })
 })
 
-worker.on('failed', (job, error) => {
+worker.on('failed', async (job, error) => {
   console.error({
     ts: new Date().toISOString(),
     level: 'error',
@@ -178,4 +130,6 @@ worker.on('failed', (job, error) => {
     attemptsMade: job?.attemptsMade,
     error: error?.stack ?? error?.message ?? String(error),
   })
+
+  if (!job) return
 })

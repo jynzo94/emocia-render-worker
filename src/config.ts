@@ -15,8 +15,6 @@ export const config = {
   storageAccessKey: requireEnv('S3_ACCESS_KEY'),
   storageSecretKey: requireEnv('S3_SECRET_KEY'),
   videoExportsBaseUrl: requireEnv('VIDEO_EXPORTS_BASE_URL').replace(/\/+$/, ''),
-  appBaseUrl: requireEnv('NEXT_PUBLIC_URL').replace(/\/+$/, ''),
-  brevoApiKey: requireEnv('BREVO_API_KEY'),
 }
 
 export const VIDEO_RENDER_QUEUE_NAME = 'video.render'
