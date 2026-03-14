@@ -1,3 +1,5 @@
+import { utils } from "./utils.js";
+
 function requireEnv(name: string) {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -19,7 +21,8 @@ export const config = {
 
 export const VIDEO_RENDER_QUEUE_NAME = "video.render";
 export const WORKER_CONCURRENCY = 1;
-export const JOB_TIMEOUT_MS = 10 * 60 * 1000;
+export const JOB_LOCK_DURATION_MS = utils.minutes(10);
+export const JOB_STALLED_INTERVAL_MS = utils.ms(30);
 export const VIDEO_EXPORT_WIDTH = 720;
 export const VIDEO_EXPORT_HEIGHT = 1280;
 export const VIDEO_EXPORT_FPS = 30;

@@ -1,6 +1,7 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 import { config } from "./config.js";
+import { utils } from "./utils.js";
 
 const s3 = new S3Client({
   region: config.storageRegion,
@@ -43,7 +44,7 @@ export async function uploadVideoObject(params: {
     objectKey: params.objectKey,
     bytes: params.body.byteLength,
     downloadUrl,
-    durationMs: Date.now() - startedAt,
+    durationSec: utils.seconds(Date.now() - startedAt),
   });
 
   return downloadUrl;

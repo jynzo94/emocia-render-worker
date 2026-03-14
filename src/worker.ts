@@ -1,7 +1,9 @@
-import { Worker } from "bullmq";
+import { Queue, Worker } from "bullmq";
 
 import {
   config,
+  JOB_LOCK_DURATION_MS,
+  JOB_STALLED_INTERVAL_MS,
   VIDEO_RENDER_QUEUE_NAME,
   WORKER_CONCURRENCY,
 } from "./config.js";
@@ -9,6 +11,22 @@ import { getGiftsCollection } from "./mongo.js";
 import { renderVideo } from "./render.js";
 import { uploadVideoObject } from "./storage.js";
 import type { RenderVideoJob } from "./types.js";
+import { utils } from "./utils.js";
+
+// This Queue instance points to the same Redis-backed `video.render` queue as the Worker
+// below. It is only used for startup cleanup/reset operations, not for job processing.
+const recoveryQueue = new Queue<RenderVideoJob>(VIDEO_RENDER_QUEUE_NAME, {
+  connection: { url: config.redisUrl },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: {
+      type: "exponential",
+      delay: 15_000,
+    },
+    removeOnComplete: 100,
+    removeOnFail: 100,
+  },
+});
 
 function truncateError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -26,8 +44,53 @@ async function markGiftStatus(
     event: "video_export.db_status_update",
     giftCode,
     fields: Object.keys(update),
+    update,
   });
   await gifts.updateOne({ code: giftCode }, { $set: update });
+}
+
+export async function resetInterruptedVideoExportsOnStartup() {
+  // In the current single-worker deployment model, a restart means any in-flight
+  // render was interrupted. Clear queue state and mark queued/processing gifts as failed
+  // so the UI can recover cleanly and the user can retry.
+  await recoveryQueue.drain(true);
+  const cleanedWaiting = await recoveryQueue.clean(0, 10_000, "wait");
+  const cleanedActive = await recoveryQueue.clean(0, 10_000, "active");
+  const cleanedDelayed = await recoveryQueue.clean(0, 10_000, "delayed");
+  const cleanedPrioritized = await recoveryQueue.clean(0, 10_000, "prioritized");
+
+  console.log({
+    ts: new Date().toISOString(),
+    level: "info",
+    event: "video_export.startup_queue_cleared",
+    cleanedWaiting: cleanedWaiting.length,
+    cleanedActive: cleanedActive.length,
+    cleanedDelayed: cleanedDelayed.length,
+    cleanedPrioritized: cleanedPrioritized.length,
+  });
+
+  const gifts = await getGiftsCollection();
+  const result = await gifts.updateMany(
+    {
+      videoExportStatus: { $in: ["queued", "processing"] },
+    },
+    {
+      $set: {
+        videoExportStatus: "failed",
+        videoExportFailedAt: new Date(),
+        videoExportError: "Video generation was interrupted by worker restart. Please try again.",
+      },
+    },
+  );
+
+  console.log({
+    ts: new Date().toISOString(),
+    level: "info",
+    event: "video_export.startup_interrupted_exports_failed",
+    matchedCount: result.matchedCount,
+    modifiedCount: result.modifiedCount,
+    errorMessage: "Video generation was interrupted by worker restart. Please try again.",
+  });
 }
 
 export const worker = new Worker<RenderVideoJob>(
@@ -44,6 +107,8 @@ export const worker = new Worker<RenderVideoJob>(
       attemptsMade: job.attemptsMade,
       giftCode: job.data.giftCode,
       fingerprint: job.data.fingerprint,
+      renderUrl: job.data.renderUrl,
+      outputObjectKey: job.data.outputObjectKey,
     });
 
     await markGiftStatus(job.data.giftCode, {
@@ -58,12 +123,12 @@ export const worker = new Worker<RenderVideoJob>(
       console.log({
         ts: new Date().toISOString(),
         level: "info",
-        event: "video_export.render_buffer_ready",
-        jobId: job.id,
-        giftCode: job.data.giftCode,
-        bytes: videoBuffer.byteLength,
-        durationMs: Date.now() - renderStartedAt,
-      });
+      event: "video_export.render_buffer_ready",
+      jobId: job.id,
+      giftCode: job.data.giftCode,
+      bytes: videoBuffer.byteLength,
+      durationSec: utils.seconds(Date.now() - renderStartedAt),
+    });
 
       const uploadStartedAt = Date.now();
       const downloadUrl = await uploadVideoObject({
@@ -88,9 +153,9 @@ export const worker = new Worker<RenderVideoJob>(
         jobId: job.id,
         giftCode: job.data.giftCode,
         downloadUrl,
-        renderDurationMs: Date.now() - renderStartedAt,
-        uploadDurationMs: Date.now() - uploadStartedAt,
-        durationMs: Date.now() - startedAt,
+        renderDurationSec: utils.seconds(Date.now() - renderStartedAt),
+        uploadDurationSec: utils.seconds(Date.now() - uploadStartedAt),
+        durationSec: utils.seconds(Date.now() - startedAt),
       });
 
       return { ok: true, downloadUrl };
@@ -108,7 +173,7 @@ export const worker = new Worker<RenderVideoJob>(
         jobId: job.id,
         giftCode: job.data.giftCode,
         fingerprint: job.data.fingerprint,
-        durationMs: Date.now() - startedAt,
+        durationSec: utils.seconds(Date.now() - startedAt),
         error:
           error instanceof Error
             ? (error.stack ?? error.message)
@@ -121,6 +186,11 @@ export const worker = new Worker<RenderVideoJob>(
   {
     connection: { url: config.redisUrl },
     concurrency: WORKER_CONCURRENCY,
+    // Keep dead-worker recovery reasonably fast without tying the Redis lock
+    // lifetime to the full render timeout for long-running jobs.
+    lockDuration: JOB_LOCK_DURATION_MS,
+    stalledInterval: JOB_STALLED_INTERVAL_MS,
+    maxStalledCount: 1,
   },
 );
 

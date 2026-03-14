@@ -11,6 +11,7 @@ import {
   VIDEO_EXPORT_WIDTH,
 } from "./config.js";
 import type { RenderStateSnapshot, RenderVideoJob } from "./types.js";
+import { utils } from "./utils.js";
 
 type RenderWindow = Window & {
   __EMOCIA_RENDER_STATE__?: RenderStateSnapshot;
@@ -121,6 +122,15 @@ export async function renderVideo(job: RenderVideoJob) {
   let page: puppeteer.Page | null = null;
   try {
     page = await browser.newPage();
+    console.log({
+      ts: new Date().toISOString(),
+      level: "info",
+      event: "video_export.viewport_config",
+      giftCode: job.giftCode,
+      width: VIDEO_EXPORT_WIDTH,
+      height: VIDEO_EXPORT_HEIGHT,
+      fps: VIDEO_EXPORT_FPS,
+    });
     await page.setViewport({
       width: VIDEO_EXPORT_WIDTH,
       height: VIDEO_EXPORT_HEIGHT,
@@ -144,7 +154,7 @@ export async function renderVideo(job: RenderVideoJob) {
       level: "info",
       event: "video_export.render_navigate_completed",
       giftCode: job.giftCode,
-      durationMs: Date.now() - navigationStartedAt,
+      durationSec: utils.seconds(Date.now() - navigationStartedAt),
     });
 
     const ready = await waitForRenderReady(page);
@@ -157,8 +167,12 @@ export async function renderVideo(job: RenderVideoJob) {
       level: "info",
       event: "video_export.render_ready",
       giftCode: job.giftCode,
-      durationMs: ready.durationMs,
+      durationSec: utils.seconds(ready.durationMs),
       progress: ready.progress,
+      estimatedTotalFrames: Math.max(
+        1,
+        Math.ceil((ready.durationMs * VIDEO_EXPORT_FPS) / 1000),
+      ),
     });
 
     await page.evaluate(async () => {
@@ -206,7 +220,7 @@ export async function renderVideo(job: RenderVideoJob) {
       event: "video_export.frame_capture_started",
       giftCode: job.giftCode,
       totalFrames,
-      durationMs: ready.durationMs,
+      durationSec: utils.seconds(ready.durationMs),
       fps: VIDEO_EXPORT_FPS,
     });
 
@@ -247,11 +261,18 @@ export async function renderVideo(job: RenderVideoJob) {
           giftCode: job.giftCode,
           processedFrames,
           totalFrames,
-          elapsedMs: elapsedCaptureMs,
-          avgFrameMs: Math.round(elapsedCaptureMs / processedFrames),
-          avgSeekMs: Math.round(totalSeekDurationMs / processedFrames),
-          avgScreenshotMs: Math.round(totalScreenshotDurationMs / processedFrames),
-          avgPipeWriteMs: Math.round(totalPipeWriteDurationMs / processedFrames),
+          progressPercent: Math.round((processedFrames / totalFrames) * 100),
+          elapsedSec: utils.seconds(elapsedCaptureMs),
+          estimatedRemainingSec: utils.seconds(
+            Math.max(
+              0,
+              Math.round((elapsedCaptureMs / processedFrames) * (totalFrames - processedFrames)),
+            ),
+          ),
+          avgFrameSec: utils.seconds(elapsedCaptureMs / processedFrames),
+          avgSeekSec: utils.seconds(totalSeekDurationMs / processedFrames),
+          avgScreenshotSec: utils.seconds(totalScreenshotDurationMs / processedFrames),
+          avgPipeWriteSec: utils.seconds(totalPipeWriteDurationMs / processedFrames),
         });
       }
     }
@@ -264,14 +285,14 @@ export async function renderVideo(job: RenderVideoJob) {
       giftCode: job.giftCode,
       totalFrames,
       streamingTo: "ffmpeg.stdin",
-      durationMs: frameCaptureDurationMs,
-      avgFrameMs: Math.round(frameCaptureDurationMs / totalFrames),
-      seekDurationMs: totalSeekDurationMs,
-      screenshotDurationMs: totalScreenshotDurationMs,
-      pipeWriteDurationMs: totalPipeWriteDurationMs,
-      avgSeekMs: Math.round(totalSeekDurationMs / totalFrames),
-      avgScreenshotMs: Math.round(totalScreenshotDurationMs / totalFrames),
-      avgPipeWriteMs: Math.round(totalPipeWriteDurationMs / totalFrames),
+      durationSec: utils.seconds(frameCaptureDurationMs),
+      avgFrameSec: utils.seconds(frameCaptureDurationMs / totalFrames),
+      seekDurationSec: utils.seconds(totalSeekDurationMs),
+      screenshotDurationSec: utils.seconds(totalScreenshotDurationMs),
+      pipeWriteDurationSec: utils.seconds(totalPipeWriteDurationMs),
+      avgSeekSec: utils.seconds(totalSeekDurationMs / totalFrames),
+      avgScreenshotSec: utils.seconds(totalScreenshotDurationMs / totalFrames),
+      avgPipeWriteSec: utils.seconds(totalPipeWriteDurationMs / totalFrames),
     });
 
     const ffmpegStartedAt = Date.now();
@@ -293,8 +314,8 @@ export async function renderVideo(job: RenderVideoJob) {
       giftCode: job.giftCode,
       outputPath,
       bytes: outputBuffer.byteLength,
-      durationMs: Date.now() - ffmpegStartedAt,
-      renderDurationMs: Date.now() - startedAt,
+      durationSec: utils.seconds(Date.now() - ffmpegStartedAt),
+      renderDurationSec: utils.seconds(Date.now() - startedAt),
     });
 
     return outputBuffer;
@@ -305,7 +326,7 @@ export async function renderVideo(job: RenderVideoJob) {
       event: "video_export.render_failed",
       giftCode: job.giftCode,
       error: error instanceof Error ? error.message : String(error),
-      renderDurationMs: Date.now() - startedAt,
+      renderDurationSec: utils.seconds(Date.now() - startedAt),
     });
     throw error;
   } finally {
@@ -317,7 +338,7 @@ export async function renderVideo(job: RenderVideoJob) {
       event: "video_export.render_cleanup_completed",
       giftCode: job.giftCode,
       tempDir,
-      renderDurationMs: Date.now() - startedAt,
+      renderDurationSec: utils.seconds(Date.now() - startedAt),
     });
   }
 }
