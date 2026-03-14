@@ -46,6 +46,7 @@ export const worker = new Worker<RenderVideoJob>(
     })
 
     try {
+      const renderStartedAt = Date.now()
       const videoBuffer = await renderVideo(job.data)
       console.log({
         ts: new Date().toISOString(),
@@ -54,8 +55,10 @@ export const worker = new Worker<RenderVideoJob>(
         jobId: job.id,
         giftCode: job.data.giftCode,
         bytes: videoBuffer.byteLength,
+        durationMs: Date.now() - renderStartedAt,
       })
 
+      const uploadStartedAt = Date.now()
       const downloadUrl = await uploadVideoObject({
         objectKey: job.data.outputObjectKey,
         body: videoBuffer,
@@ -78,6 +81,8 @@ export const worker = new Worker<RenderVideoJob>(
         jobId: job.id,
         giftCode: job.data.giftCode,
         downloadUrl,
+        renderDurationMs: Date.now() - renderStartedAt,
+        uploadDurationMs: Date.now() - uploadStartedAt,
         durationMs: Date.now() - startedAt,
       })
 

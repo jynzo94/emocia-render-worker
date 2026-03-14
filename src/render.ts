@@ -6,6 +6,7 @@ import path from 'node:path'
 import puppeteer from 'puppeteer'
 
 import type { RenderStateSnapshot, RenderVideoJob } from './types.js'
+
 type RenderWindow = Window & {
   __EMOCIA_RENDER_STATE__?: RenderStateSnapshot
   __EMOCIA_RENDER_CONTROLLER__?: {
@@ -102,18 +103,18 @@ export async function renderVideo(job: RenderVideoJob) {
     tempDir,
   })
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--autoplay-policy=no-user-gesture-required'],
-    defaultViewport: {
+  const browser = await getBrowser()
+
+  let page: puppeteer.Page | null = null
+  try {
+    page = await browser.newPage()
+    await page.setViewport({
       width: job.width,
       height: job.height,
       deviceScaleFactor: 1,
-    },
-  })
+    })
 
-  try {
-    const page = await browser.newPage()
+    const navigationStartedAt = Date.now()
     console.log({
       ts: new Date().toISOString(),
       level: 'info',
@@ -127,6 +128,7 @@ export async function renderVideo(job: RenderVideoJob) {
       level: 'info',
       event: 'video_export.render_navigate_completed',
       giftCode: job.giftCode,
+      durationMs: Date.now() - navigationStartedAt,
     })
 
     const ready = await waitForRenderReady(page)
@@ -153,21 +155,21 @@ export async function renderVideo(job: RenderVideoJob) {
 
     const totalFrames = Math.max(1, Math.ceil((ready.durationMs / 1000) * job.fps) + 1)
     const ffmpegArgs = [
-      '-y',
-      '-f',
-      'image2pipe',
-      '-framerate',
+      "-y",
+      "-f",
+      "image2pipe",
+      "-framerate",
       String(job.fps),
-      '-vcodec',
-      'png',
-      '-i',
-      'pipe:0',
-      '-c:v',
-      'libx264',
-      '-pix_fmt',
-      'yuv420p',
-      '-movflags',
-      '+faststart',
+      "-vcodec",
+      "mjpeg",
+      "-i",
+      "pipe:0",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-pix_fmt",
+      "yuv420p",
       outputPath,
     ]
     const ffmpeg = spawn('ffmpeg', ffmpegArgs, {
@@ -189,11 +191,13 @@ export async function renderVideo(job: RenderVideoJob) {
       fps: job.fps,
     })
 
+    const frameCaptureStartedAt = Date.now()
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       const elapsedMs = Math.min(ready.durationMs, Math.round((frameIndex / job.fps) * 1000))
       await seekToMs(page, elapsedMs)
       const frame = await page.screenshot({
-        type: 'png',
+        type: 'jpeg',
+        quality: 80,
       })
       await writeFrameToFfmpeg(ffmpeg.stdin, frame)
     }
@@ -205,8 +209,10 @@ export async function renderVideo(job: RenderVideoJob) {
       giftCode: job.giftCode,
       totalFrames,
       streamingTo: 'ffmpeg.stdin',
+      durationMs: Date.now() - frameCaptureStartedAt,
     })
 
+    const ffmpegStartedAt = Date.now()
     console.log({
       ts: new Date().toISOString(),
       level: 'info',
@@ -225,6 +231,7 @@ export async function renderVideo(job: RenderVideoJob) {
       giftCode: job.giftCode,
       outputPath,
       bytes: outputBuffer.byteLength,
+      durationMs: Date.now() - ffmpegStartedAt,
       renderDurationMs: Date.now() - startedAt,
     })
 
@@ -240,7 +247,7 @@ export async function renderVideo(job: RenderVideoJob) {
     })
     throw error
   } finally {
-    await browser.close()
+    await page?.close().catch(() => undefined)
     await rm(tempDir, { recursive: true, force: true })
     console.log({
       ts: new Date().toISOString(),
@@ -251,4 +258,26 @@ export async function renderVideo(job: RenderVideoJob) {
       renderDurationMs: Date.now() - startedAt,
     })
   }
+}
+let browserPromise: Promise<puppeteer.Browser> | null = null
+
+async function getBrowser() {
+  if (browserPromise) {
+    const browser = await browserPromise
+    if (browser.isConnected()) {
+      return browser
+    }
+  }
+
+  browserPromise = puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--autoplay-policy=no-user-gesture-required'],
+  })
+
+  const browser = await browserPromise
+  browser.on('disconnected', () => {
+    browserPromise = null
+  })
+
+  return browser
 }

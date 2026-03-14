@@ -12,6 +12,7 @@ const s3 = new S3Client({
 })
 
 export async function uploadVideoObject(params: { objectKey: string; body: Buffer }) {
+  const startedAt = Date.now()
   console.log({
     ts: new Date().toISOString(),
     level: 'info',
@@ -39,6 +40,7 @@ export async function uploadVideoObject(params: { objectKey: string; body: Buffe
     objectKey: params.objectKey,
     bytes: params.body.byteLength,
     downloadUrl,
+    durationMs: Date.now() - startedAt,
   })
 
   return downloadUrl
