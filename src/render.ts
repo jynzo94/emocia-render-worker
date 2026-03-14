@@ -5,6 +5,11 @@ import path from "node:path";
 
 import puppeteer from "puppeteer";
 
+import {
+  VIDEO_EXPORT_FPS,
+  VIDEO_EXPORT_HEIGHT,
+  VIDEO_EXPORT_WIDTH,
+} from "./config.js";
 import type { RenderStateSnapshot, RenderVideoJob } from "./types.js";
 
 type RenderWindow = Window & {
@@ -105,9 +110,9 @@ export async function renderVideo(job: RenderVideoJob) {
     event: "video_export.render_started",
     giftCode: job.giftCode,
     renderUrl: job.renderUrl,
-    width: job.width,
-    height: job.height,
-    fps: job.fps,
+    width: VIDEO_EXPORT_WIDTH,
+    height: VIDEO_EXPORT_HEIGHT,
+    fps: VIDEO_EXPORT_FPS,
     tempDir,
   });
 
@@ -117,8 +122,8 @@ export async function renderVideo(job: RenderVideoJob) {
   try {
     page = await browser.newPage();
     await page.setViewport({
-      width: job.width,
-      height: job.height,
+      width: VIDEO_EXPORT_WIDTH,
+      height: VIDEO_EXPORT_HEIGHT,
       deviceScaleFactor: 1,
     });
 
@@ -131,7 +136,7 @@ export async function renderVideo(job: RenderVideoJob) {
       renderUrl: job.renderUrl,
     });
     await page.goto(job.renderUrl, {
-      waitUntil: "networkidle2",
+      waitUntil: "domcontentloaded",
       timeout: 60_000,
     });
     console.log({
@@ -166,14 +171,14 @@ export async function renderVideo(job: RenderVideoJob) {
 
     const totalFrames = Math.max(
       1,
-      Math.ceil((ready.durationMs / 1000) * job.fps) + 1,
+      Math.ceil((ready.durationMs * VIDEO_EXPORT_FPS) / 1000),
     );
     const ffmpegArgs = [
       "-y",
       "-f",
       "image2pipe",
       "-framerate",
-      String(job.fps),
+      String(VIDEO_EXPORT_FPS),
       "-vcodec",
       "mjpeg",
       "-i",
@@ -181,7 +186,7 @@ export async function renderVideo(job: RenderVideoJob) {
       "-c:v",
       "libx264",
       "-preset",
-      "veryfast",
+      "superfast",
       "-pix_fmt",
       "yuv420p",
       outputPath,
@@ -202,23 +207,56 @@ export async function renderVideo(job: RenderVideoJob) {
       giftCode: job.giftCode,
       totalFrames,
       durationMs: ready.durationMs,
-      fps: job.fps,
+      fps: VIDEO_EXPORT_FPS,
     });
 
     const frameCaptureStartedAt = Date.now();
+    let totalSeekDurationMs = 0;
+    let totalScreenshotDurationMs = 0;
+    let totalPipeWriteDurationMs = 0;
+
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       const elapsedMs = Math.min(
         ready.durationMs,
-        Math.round((frameIndex / job.fps) * 1000),
+        Math.round((frameIndex / VIDEO_EXPORT_FPS) * 1000),
       );
+
+      const seekStartedAt = Date.now();
       await seekToMs(page, elapsedMs);
+      totalSeekDurationMs += Date.now() - seekStartedAt;
+
+      const screenshotStartedAt = Date.now();
       const frame = await page.screenshot({
         type: "jpeg",
         quality: 80,
       });
+      totalScreenshotDurationMs += Date.now() - screenshotStartedAt;
+
+      const pipeWriteStartedAt = Date.now();
       await writeFrameToFfmpeg(ffmpeg.stdin, frame);
+      totalPipeWriteDurationMs += Date.now() - pipeWriteStartedAt;
+
+      if ((frameIndex + 1) % 100 === 0 || frameIndex === totalFrames - 1) {
+        const processedFrames = frameIndex + 1;
+        const elapsedCaptureMs = Date.now() - frameCaptureStartedAt;
+
+        console.log({
+          ts: new Date().toISOString(),
+          level: "info",
+          event: "video_export.frame_capture_progress",
+          giftCode: job.giftCode,
+          processedFrames,
+          totalFrames,
+          elapsedMs: elapsedCaptureMs,
+          avgFrameMs: Math.round(elapsedCaptureMs / processedFrames),
+          avgSeekMs: Math.round(totalSeekDurationMs / processedFrames),
+          avgScreenshotMs: Math.round(totalScreenshotDurationMs / processedFrames),
+          avgPipeWriteMs: Math.round(totalPipeWriteDurationMs / processedFrames),
+        });
+      }
     }
 
+    const frameCaptureDurationMs = Date.now() - frameCaptureStartedAt;
     console.log({
       ts: new Date().toISOString(),
       level: "info",
@@ -226,7 +264,14 @@ export async function renderVideo(job: RenderVideoJob) {
       giftCode: job.giftCode,
       totalFrames,
       streamingTo: "ffmpeg.stdin",
-      durationMs: Date.now() - frameCaptureStartedAt,
+      durationMs: frameCaptureDurationMs,
+      avgFrameMs: Math.round(frameCaptureDurationMs / totalFrames),
+      seekDurationMs: totalSeekDurationMs,
+      screenshotDurationMs: totalScreenshotDurationMs,
+      pipeWriteDurationMs: totalPipeWriteDurationMs,
+      avgSeekMs: Math.round(totalSeekDurationMs / totalFrames),
+      avgScreenshotMs: Math.round(totalScreenshotDurationMs / totalFrames),
+      avgPipeWriteMs: Math.round(totalPipeWriteDurationMs / totalFrames),
     });
 
     const ffmpegStartedAt = Date.now();

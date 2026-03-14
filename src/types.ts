@@ -1,9 +1,6 @@
 export type RenderVideoJob = {
   giftCode: string
   renderUrl: string
-  fps: number
-  width: number
-  height: number
   fingerprint: string
   outputObjectKey: string
 }

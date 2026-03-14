@@ -1,22 +1,25 @@
 function requireEnv(name: string) {
-  const value = process.env[name]?.trim()
+  const value = process.env[name]?.trim();
   if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`)
+    throw new Error(`Missing required environment variable: ${name}`);
   }
-  return value
+  return value;
 }
 
 export const config = {
-  redisUrl: requireEnv('REDIS_URL'),
-  databaseUrl: requireEnv('DATABASE_URL'),
-  storageBucket: requireEnv('S3_BUCKET'),
-  storageRegion: requireEnv('S3_REGION'),
-  storageEndpoint: requireEnv('S3_URL'),
-  storageAccessKey: requireEnv('S3_ACCESS_KEY'),
-  storageSecretKey: requireEnv('S3_SECRET_KEY'),
-  videoExportsBaseUrl: requireEnv('VIDEO_EXPORTS_BASE_URL').replace(/\/+$/, ''),
-}
+  redisUrl: requireEnv("REDIS_URL"),
+  databaseUrl: requireEnv("DATABASE_URL"),
+  storageBucket: requireEnv("S3_BUCKET"),
+  storageRegion: requireEnv("S3_REGION"),
+  storageEndpoint: requireEnv("S3_URL"),
+  storageAccessKey: requireEnv("S3_ACCESS_KEY"),
+  storageSecretKey: requireEnv("S3_SECRET_KEY"),
+  videoExportsBaseUrl: requireEnv("VIDEO_EXPORTS_BASE_URL").replace(/\/+$/, ""),
+};
 
-export const VIDEO_RENDER_QUEUE_NAME = 'video.render'
-export const WORKER_CONCURRENCY = 1
-export const JOB_TIMEOUT_MS = 10 * 60 * 1000
+export const VIDEO_RENDER_QUEUE_NAME = "video.render";
+export const WORKER_CONCURRENCY = 1;
+export const JOB_TIMEOUT_MS = 10 * 60 * 1000;
+export const VIDEO_EXPORT_WIDTH = 720;
+export const VIDEO_EXPORT_HEIGHT = 1280;
+export const VIDEO_EXPORT_FPS = 30;
