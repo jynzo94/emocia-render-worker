@@ -8,8 +8,6 @@ export type RenderVideoJob = {
   outputObjectKey: string
 }
 
-export type VideoExportJob = RenderVideoJob
-
 type RenderStatus = 'idle' | 'ready' | 'started' | 'finished'
 
 export type RenderStateSnapshot = {

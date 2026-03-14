@@ -4,7 +4,7 @@ import { config, VIDEO_RENDER_QUEUE_NAME, WORKER_CONCURRENCY } from './config.js
 import { getGiftsCollection } from './mongo.js'
 import { renderVideo } from './render.js'
 import { uploadVideoObject } from './storage.js'
-import type { VideoExportJob } from './types.js'
+import type { RenderVideoJob } from './types.js'
 
 function truncateError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
@@ -23,7 +23,7 @@ async function markGiftStatus(giftCode: string, update: Record<string, unknown>)
   await gifts.updateOne({ code: giftCode }, { $set: update })
 }
 
-export const worker = new Worker<VideoExportJob>(
+export const worker = new Worker<RenderVideoJob>(
   VIDEO_RENDER_QUEUE_NAME,
   async (job) => {
     const startedAt = Date.now()
