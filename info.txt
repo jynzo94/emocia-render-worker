@@ -1,0 +1,3 @@
+docker run --gpus all \
+  -e REDIS_HOST=host.docker.internal \
+  emocia-render-worker
