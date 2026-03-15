@@ -22,6 +22,14 @@ console.log({
 });
 
 await resetInterruptedVideoExportsOnStartup();
+await worker.run();
+
+console.log({
+  ts: new Date().toISOString(),
+  level: "info",
+  event: "video_export.worker_consuming_started",
+  queueName: VIDEO_RENDER_QUEUE_NAME,
+});
 
 process.on("SIGINT", async () => {
   await worker.close();

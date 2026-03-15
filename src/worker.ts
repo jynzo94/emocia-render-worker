@@ -50,23 +50,28 @@ async function markGiftStatus(
 }
 
 export async function resetInterruptedVideoExportsOnStartup() {
-  // In the current single-worker deployment model, a restart means any in-flight
-  // render was interrupted. Clear queue state and mark queued/processing gifts as failed
-  // so the UI can recover cleanly and the user can retry.
-  await recoveryQueue.drain(true);
-  const cleanedWaiting = await recoveryQueue.clean(0, 10_000, "wait");
-  const cleanedActive = await recoveryQueue.clean(0, 10_000, "active");
-  const cleanedDelayed = await recoveryQueue.clean(0, 10_000, "delayed");
-  const cleanedPrioritized = await recoveryQueue.clean(0, 10_000, "prioritized");
+  // In the current single-worker deployment model, a restart invalidates any
+  // in-flight queue state. Clear BullMQ first so retries cannot attach to stale jobs.
+  const countsBefore = await recoveryQueue.getJobCounts(
+    "wait",
+    "active",
+    "delayed",
+    "prioritized",
+    "failed",
+    "completed",
+  );
+  await recoveryQueue.obliterate({ force: true });
 
   console.log({
     ts: new Date().toISOString(),
     level: "info",
     event: "video_export.startup_queue_cleared",
-    cleanedWaiting: cleanedWaiting.length,
-    cleanedActive: cleanedActive.length,
-    cleanedDelayed: cleanedDelayed.length,
-    cleanedPrioritized: cleanedPrioritized.length,
+    waitingBefore: countsBefore.wait ?? 0,
+    activeBefore: countsBefore.active ?? 0,
+    delayedBefore: countsBefore.delayed ?? 0,
+    prioritizedBefore: countsBefore.prioritized ?? 0,
+    failedBefore: countsBefore.failed ?? 0,
+    completedBefore: countsBefore.completed ?? 0,
   });
 
   const gifts = await getGiftsCollection();
@@ -78,7 +83,8 @@ export async function resetInterruptedVideoExportsOnStartup() {
       $set: {
         videoExportStatus: "failed",
         videoExportFailedAt: new Date(),
-        videoExportError: "Video generation was interrupted by worker restart. Please try again.",
+        videoExportError:
+          "Video generation was interrupted by worker restart. Please try again.",
       },
     },
   );
@@ -90,7 +96,8 @@ export async function resetInterruptedVideoExportsOnStartup() {
     matchedCount: result.matchedCount,
     modifiedCount: result.modifiedCount,
     reason: "worker_restart_reset",
-    errorMessage: "Video generation was interrupted by worker restart. Please try again.",
+    errorMessage:
+      "Video generation was interrupted by worker restart. Please try again.",
   });
 }
 
@@ -138,12 +145,12 @@ export const worker = new Worker<RenderVideoJob>(
       console.log({
         ts: new Date().toISOString(),
         level: "info",
-      event: "video_export.render_buffer_ready",
-      jobId: job.id,
-      giftCode: job.data.giftCode,
-      bytes: videoBuffer.byteLength,
-      durationSec: utils.seconds(Date.now() - renderStartedAt),
-    });
+        event: "video_export.render_buffer_ready",
+        jobId: job.id,
+        giftCode: job.data.giftCode,
+        bytes: videoBuffer.byteLength,
+        durationSec: utils.seconds(Date.now() - renderStartedAt),
+      });
 
       const uploadStartedAt = Date.now();
       const downloadUrl = await uploadVideoObject({
@@ -214,6 +221,7 @@ export const worker = new Worker<RenderVideoJob>(
   {
     connection: { url: config.redisUrl },
     concurrency: WORKER_CONCURRENCY,
+    autorun: false,
     // Keep dead-worker recovery reasonably fast without tying the Redis lock
     // lifetime to the full render timeout for long-running jobs.
     lockDuration: JOB_LOCK_DURATION_MS,
