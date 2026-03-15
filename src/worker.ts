@@ -89,6 +89,7 @@ export async function resetInterruptedVideoExportsOnStartup() {
     event: "video_export.startup_interrupted_exports_failed",
     matchedCount: result.matchedCount,
     modifiedCount: result.modifiedCount,
+    reason: "worker_restart_reset",
     errorMessage: "Video generation was interrupted by worker restart. Please try again.",
   });
 }
@@ -97,6 +98,7 @@ export const worker = new Worker<RenderVideoJob>(
   VIDEO_RENDER_QUEUE_NAME,
   async (job) => {
     const startedAt = Date.now();
+    let lastReportedProgress = -1;
 
     console.log({
       ts: new Date().toISOString(),
@@ -116,10 +118,23 @@ export const worker = new Worker<RenderVideoJob>(
       videoExportProcessingAt: new Date(),
       videoExportError: null,
     });
+    await job.updateProgress(0);
 
     try {
       const renderStartedAt = Date.now();
-      const videoBuffer = await renderVideo(job.data);
+      const videoBuffer = await renderVideo(job.data, async (progress) => {
+        const normalizedProgress = Math.max(
+          0,
+          Math.min(100, Math.round(progress)),
+        );
+
+        if (normalizedProgress === lastReportedProgress) {
+          return;
+        }
+
+        lastReportedProgress = normalizedProgress;
+        await job.updateProgress(normalizedProgress);
+      });
       console.log({
         ts: new Date().toISOString(),
         level: "info",
@@ -160,10 +175,23 @@ export const worker = new Worker<RenderVideoJob>(
 
       return { ok: true, downloadUrl };
     } catch (error) {
+      const videoExportError = truncateError(error);
+
       await markGiftStatus(job.data.giftCode, {
         videoExportStatus: "failed",
         videoExportFailedAt: new Date(),
-        videoExportError: truncateError(error),
+        videoExportError,
+      });
+
+      console.error({
+        ts: new Date().toISOString(),
+        level: "error",
+        event: "video_export.job_marked_failed",
+        jobId: job.id,
+        giftCode: job.data.giftCode,
+        fingerprint: job.data.fingerprint,
+        reason: "render_or_upload_failed",
+        videoExportError,
       });
 
       console.error({

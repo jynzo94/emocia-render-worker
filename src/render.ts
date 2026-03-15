@@ -98,7 +98,10 @@ async function finalizeFfmpeg(params: {
   });
 }
 
-export async function renderVideo(job: RenderVideoJob) {
+export async function renderVideo(
+  job: RenderVideoJob,
+  onProgress?: (progress: number) => Promise<void> | void,
+) {
   const tempDir = await mkdtemp(
     path.join(tmpdir(), `emocia-render-${job.giftCode}-`),
   );
@@ -131,6 +134,8 @@ export async function renderVideo(job: RenderVideoJob) {
       height: VIDEO_EXPORT_HEIGHT,
       fps: VIDEO_EXPORT_FPS,
     });
+
+    await onProgress?.(0);
     await page.setViewport({
       width: VIDEO_EXPORT_WIDTH,
       height: VIDEO_EXPORT_HEIGHT,
@@ -250,6 +255,10 @@ export async function renderVideo(job: RenderVideoJob) {
       await writeFrameToFfmpeg(ffmpeg.stdin, frame);
       totalPipeWriteDurationMs += Date.now() - pipeWriteStartedAt;
 
+      await onProgress?.(
+        Math.max(1, Math.min(99, Math.round(((frameIndex + 1) / totalFrames) * 100))),
+      );
+
       if ((frameIndex + 1) % 100 === 0 || frameIndex === totalFrames - 1) {
         const processedFrames = frameIndex + 1;
         const elapsedCaptureMs = Date.now() - frameCaptureStartedAt;
@@ -307,6 +316,7 @@ export async function renderVideo(job: RenderVideoJob) {
     await finalizeFfmpeg({ ffmpeg, stderrChunks });
 
     const outputBuffer = await readFile(outputPath);
+    await onProgress?.(100);
     console.log({
       ts: new Date().toISOString(),
       level: "info",
