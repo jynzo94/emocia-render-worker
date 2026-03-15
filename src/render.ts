@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -21,6 +21,16 @@ type RenderWindow = Window & {
     seekToMs: (ms: number) => Promise<RenderStateSnapshot | undefined>;
   };
 };
+
+function toLogError(error: unknown) {
+  return error instanceof Error
+    ? {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      }
+    : { message: String(error) };
+}
 
 function getRenderUrl(giftCode: string) {
   return `${config.appBaseUrl}/gift/${encodeURIComponent(giftCode)}?export=1`;
@@ -67,6 +77,180 @@ async function waitForRenderReady(page: puppeteer.Page) {
     () =>
       (window as RenderWindow).__EMOCIA_RENDER_STATE__ as RenderStateSnapshot,
   );
+}
+
+function attachPageLogging(page: puppeteer.Page, job: RenderVideoJob) {
+  page.on("console", async (msg) => {
+    let args: unknown[] = [];
+
+    try {
+      args = await Promise.all(
+        msg.args().map(async (arg) => {
+          try {
+            return await arg.jsonValue();
+          } catch {
+            return "[unserializable]";
+          }
+        }),
+      );
+    } catch {
+      args = ["[args_unavailable]"];
+    }
+
+    console.log({
+      ts: new Date().toISOString(),
+      level: msg.type() === "error" ? "error" : "info",
+      event: "video_export.browser_console",
+      giftCode: job.giftCode,
+      consoleType: msg.type(),
+      text: msg.text(),
+      args,
+      location: msg.location(),
+    });
+  });
+
+  page.on("pageerror", (error) => {
+    console.error({
+      ts: new Date().toISOString(),
+      level: "error",
+      event: "video_export.browser_pageerror",
+      giftCode: job.giftCode,
+      error: toLogError(error),
+    });
+  });
+
+  page.on("requestfailed", (request) => {
+    console.error({
+      ts: new Date().toISOString(),
+      level: "error",
+      event: "video_export.browser_request_failed",
+      giftCode: job.giftCode,
+      url: request.url(),
+      method: request.method(),
+      resourceType: request.resourceType(),
+      failure: request.failure()?.errorText,
+    });
+  });
+
+  page.on("response", async (response) => {
+    const request = response.request();
+    const headers = response.headers();
+    const contentType = headers["content-type"] ?? "";
+    const status = response.status();
+    const shouldLog =
+      status >= 400 ||
+      (request.resourceType() === "image" && contentType.includes("text/html"));
+
+    if (!shouldLog) {
+      return;
+    }
+
+    let bodyPreview: string | undefined;
+    try {
+      bodyPreview = (await response.text()).slice(0, 500);
+    } catch {
+      bodyPreview = undefined;
+    }
+
+    console.error({
+      ts: new Date().toISOString(),
+      level: "error",
+      event: "video_export.browser_bad_response",
+      giftCode: job.giftCode,
+      url: response.url(),
+      status,
+      resourceType: request.resourceType(),
+      contentType,
+      headers,
+      bodyPreview,
+    });
+  });
+}
+
+async function dumpRenderFailureArtifacts(params: {
+  page: puppeteer.Page | null;
+  job: RenderVideoJob;
+  tempDir: string;
+}) {
+  const { page, job, tempDir } = params;
+  if (!page) {
+    return;
+  }
+
+  const screenshotPath = path.join(tempDir, "render-failure.png");
+  const htmlPath = path.join(tempDir, "render-failure.html");
+
+  try {
+    const renderState = await page
+      .evaluate(
+        () =>
+          (window as RenderWindow).__EMOCIA_RENDER_STATE__ as
+            | RenderStateSnapshot
+            | undefined,
+      )
+      .catch(() => undefined);
+
+    console.error({
+      ts: new Date().toISOString(),
+      level: "error",
+      event: "video_export.render_failure_state",
+      giftCode: job.giftCode,
+      renderState,
+      url: page.url(),
+      title: await page.title().catch(() => undefined),
+    });
+
+    await page
+      .screenshot({ path: screenshotPath, fullPage: true })
+      .then(() => {
+        console.error({
+          ts: new Date().toISOString(),
+          level: "error",
+          event: "video_export.render_failure_screenshot_saved",
+          giftCode: job.giftCode,
+          screenshotPath,
+        });
+      })
+      .catch((error) => {
+        console.error({
+          ts: new Date().toISOString(),
+          level: "error",
+          event: "video_export.render_failure_screenshot_failed",
+          giftCode: job.giftCode,
+          error: toLogError(error),
+        });
+      });
+
+    await page
+      .content()
+      .then((html) => writeFile(htmlPath, html, "utf8"))
+      .then(() => {
+        console.error({
+          ts: new Date().toISOString(),
+          level: "error",
+          event: "video_export.render_failure_html_saved",
+          giftCode: job.giftCode,
+          htmlPath,
+        });
+      })
+      .catch((error) => {
+        console.error({
+          ts: new Date().toISOString(),
+          level: "error",
+          event: "video_export.render_failure_html_failed",
+          giftCode: job.giftCode,
+          error: toLogError(error),
+        });
+      });
+  } catch (error) {
+    console.error({
+      ts: new Date().toISOString(),
+      level: "error",
+      event: "video_export.render_failure_artifacts_failed",
+      giftCode: job.giftCode,
+      error: toLogError(error),
+    });
+  }
 }
 
 async function seekToMs(page: puppeteer.Page, ms: number) {
@@ -154,6 +338,7 @@ export async function renderVideo(
   let page: puppeteer.Page | null = null;
   try {
     page = await browser.newPage();
+    attachPageLogging(page, job);
     console.log({
       ts: new Date().toISOString(),
       level: "info",
@@ -376,20 +561,18 @@ export async function renderVideo(
 
     return outputBuffer;
   } catch (error) {
+    await dumpRenderFailureArtifacts({
+      page,
+      job,
+      tempDir,
+    });
     console.error({
       ts: new Date().toISOString(),
       level: "error",
       event: "video_export.render_failed",
       giftCode: job.giftCode,
       renderDurationSec: utils.seconds(Date.now() - startedAt),
-      error:
-        error instanceof Error
-          ? {
-              name: error.name,
-              message: error.message,
-              stack: error.stack,
-            }
-          : { message: String(error) },
+      error: toLogError(error),
     });
     throw error;
   } finally {
