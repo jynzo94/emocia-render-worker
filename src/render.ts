@@ -97,16 +97,16 @@ function attachPageLogging(page: puppeteer.Page, job: RenderVideoJob) {
       args = ["[args_unavailable]"];
     }
 
-    console.log({
-      ts: new Date().toISOString(),
-      level: msg.type() === "error" ? "error" : "info",
-      event: "video_export.browser_console",
-      giftCode: job.giftCode,
-      consoleType: msg.type(),
-      text: msg.text(),
-      args,
-      location: msg.location(),
-    });
+    // console.log({
+    //   ts: new Date().toISOString(),
+    //   level: msg.type() === "error" ? "error" : "info",
+    //   event: "video_export.browser_console",
+    //   giftCode: job.giftCode,
+    //   consoleType: msg.type(),
+    //   text: msg.text(),
+    //   args,
+    //   location: msg.location(),
+    // });
   });
 
   page.on("pageerror", (error) => {
@@ -487,7 +487,10 @@ export async function renderVideo(
       totalPipeWriteDurationMs += Date.now() - pipeWriteStartedAt;
 
       await onProgress?.(
-        Math.max(1, Math.min(99, Math.round(((frameIndex + 1) / totalFrames) * 100))),
+        Math.max(
+          1,
+          Math.min(99, Math.round(((frameIndex + 1) / totalFrames) * 100)),
+        ),
       );
 
       if ((frameIndex + 1) % 100 === 0 || frameIndex === totalFrames - 1) {
@@ -506,13 +509,20 @@ export async function renderVideo(
           estimatedRemainingSec: utils.seconds(
             Math.max(
               0,
-              Math.round((elapsedCaptureMs / processedFrames) * (totalFrames - processedFrames)),
+              Math.round(
+                (elapsedCaptureMs / processedFrames) *
+                  (totalFrames - processedFrames),
+              ),
             ),
           ),
           avgFrameSec: utils.seconds(elapsedCaptureMs / processedFrames),
           avgSeekSec: utils.seconds(totalSeekDurationMs / processedFrames),
-          avgScreenshotSec: utils.seconds(totalScreenshotDurationMs / processedFrames),
-          avgPipeWriteSec: utils.seconds(totalPipeWriteDurationMs / processedFrames),
+          avgScreenshotSec: utils.seconds(
+            totalScreenshotDurationMs / processedFrames,
+          ),
+          avgPipeWriteSec: utils.seconds(
+            totalPipeWriteDurationMs / processedFrames,
+          ),
         });
       }
     }
