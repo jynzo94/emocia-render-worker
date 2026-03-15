@@ -1,8 +1,5 @@
 export type RenderVideoJob = {
   giftCode: string
-  renderUrl: string
-  fingerprint: string
-  outputObjectKey: string
 }
 
 type RenderStatus = 'idle' | 'ready' | 'started' | 'finished'

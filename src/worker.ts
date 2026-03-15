@@ -13,6 +13,10 @@ import { uploadVideoObject } from "./storage.js";
 import type { RenderVideoJob } from "./types.js";
 import { utils } from "./utils.js";
 
+function getVideoObjectKey(giftCode: string) {
+  return `gifts/${giftCode}/video/video.mp4`;
+}
+
 // This Queue instance points to the same Redis-backed `video.render` queue as the Worker
 // below. It is only used for startup cleanup/reset operations, not for job processing.
 const recoveryQueue = new Queue<RenderVideoJob>(VIDEO_RENDER_QUEUE_NAME, {
@@ -82,9 +86,6 @@ export async function resetInterruptedVideoExportsOnStartup() {
     {
       $set: {
         videoExportStatus: "failed",
-        videoExportFailedAt: new Date(),
-        videoExportError:
-          "Video generation was interrupted by worker restart. Please try again.",
       },
     },
   );
@@ -96,8 +97,6 @@ export async function resetInterruptedVideoExportsOnStartup() {
     matchedCount: result.matchedCount,
     modifiedCount: result.modifiedCount,
     reason: "worker_restart_reset",
-    errorMessage:
-      "Video generation was interrupted by worker restart. Please try again.",
   });
 }
 
@@ -115,15 +114,12 @@ export const worker = new Worker<RenderVideoJob>(
       queueName: job.queueName,
       attemptsMade: job.attemptsMade,
       giftCode: job.data.giftCode,
-      fingerprint: job.data.fingerprint,
-      renderUrl: job.data.renderUrl,
-      outputObjectKey: job.data.outputObjectKey,
+      renderUrl: `${config.appBaseUrl}/gift/${encodeURIComponent(job.data.giftCode)}?export=1`,
+      outputObjectKey: getVideoObjectKey(job.data.giftCode),
     });
 
     await markGiftStatus(job.data.giftCode, {
       videoExportStatus: "processing",
-      videoExportProcessingAt: new Date(),
-      videoExportError: null,
     });
     await job.updateProgress(0);
 
@@ -153,19 +149,15 @@ export const worker = new Worker<RenderVideoJob>(
       });
 
       const uploadStartedAt = Date.now();
-      const downloadUrl = await uploadVideoObject({
-        objectKey: job.data.outputObjectKey,
+      const outputObjectKey = getVideoObjectKey(job.data.giftCode);
+      await uploadVideoObject({
+        objectKey: outputObjectKey,
         body: videoBuffer,
       });
 
       await markGiftStatus(job.data.giftCode, {
         videoExportStatus: "completed",
-        videoExportCompletedAt: new Date(),
-        videoExportFailedAt: null,
-        videoExportError: null,
-        videoExportFileKey: job.data.outputObjectKey,
-        videoExportUrl: downloadUrl,
-        videoExportFingerprint: job.data.fingerprint,
+        videoExportFileKey: outputObjectKey,
       });
 
       console.log({
@@ -174,20 +166,15 @@ export const worker = new Worker<RenderVideoJob>(
         event: "video_export.job_succeeded",
         jobId: job.id,
         giftCode: job.data.giftCode,
-        downloadUrl,
         renderDurationSec: utils.seconds(Date.now() - renderStartedAt),
         uploadDurationSec: utils.seconds(Date.now() - uploadStartedAt),
         durationSec: utils.seconds(Date.now() - startedAt),
       });
 
-      return { ok: true, downloadUrl };
+      return { ok: true };
     } catch (error) {
-      const videoExportError = truncateError(error);
-
       await markGiftStatus(job.data.giftCode, {
         videoExportStatus: "failed",
-        videoExportFailedAt: new Date(),
-        videoExportError,
       });
 
       console.error({
@@ -196,9 +183,16 @@ export const worker = new Worker<RenderVideoJob>(
         event: "video_export.job_marked_failed",
         jobId: job.id,
         giftCode: job.data.giftCode,
-        fingerprint: job.data.fingerprint,
         reason: "render_or_upload_failed",
-        videoExportError,
+        errorMessage: truncateError(error),
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : { message: String(error) },
       });
 
       console.error({
@@ -207,12 +201,15 @@ export const worker = new Worker<RenderVideoJob>(
         event: "video_export.job_failed",
         jobId: job.id,
         giftCode: job.data.giftCode,
-        fingerprint: job.data.fingerprint,
         durationSec: utils.seconds(Date.now() - startedAt),
         error:
           error instanceof Error
-            ? (error.stack ?? error.message)
-            : String(error),
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : { message: String(error) },
       });
 
       throw error;
@@ -249,7 +246,14 @@ worker.on("failed", async (job, error) => {
     jobId: job?.id,
     giftCode: job?.data.giftCode,
     attemptsMade: job?.attemptsMade,
-    error: error?.stack ?? error?.message ?? String(error),
+    error:
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : { message: String(error) },
   });
 
   if (!job) return;

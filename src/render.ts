@@ -6,6 +6,7 @@ import path from "node:path";
 import puppeteer from "puppeteer";
 
 import {
+  config,
   VIDEO_EXPORT_FPS,
   VIDEO_EXPORT_HEIGHT,
   VIDEO_EXPORT_WIDTH,
@@ -20,6 +21,33 @@ type RenderWindow = Window & {
     seekToMs: (ms: number) => Promise<RenderStateSnapshot | undefined>;
   };
 };
+
+function getRenderUrl(giftCode: string) {
+  return `${config.appBaseUrl}/gift/${encodeURIComponent(giftCode)}?export=1`;
+}
+
+function getViewportConfig() {
+  const width = Math.trunc(Number(VIDEO_EXPORT_WIDTH));
+  const height = Math.trunc(Number(VIDEO_EXPORT_HEIGHT));
+
+  if (!Number.isFinite(width) || width <= 0) {
+    throw new Error(
+      `Invalid VIDEO_EXPORT_WIDTH: ${String(VIDEO_EXPORT_WIDTH)}`,
+    );
+  }
+
+  if (!Number.isFinite(height) || height <= 0) {
+    throw new Error(
+      `Invalid VIDEO_EXPORT_HEIGHT: ${String(VIDEO_EXPORT_HEIGHT)}`,
+    );
+  }
+
+  return {
+    width,
+    height,
+    deviceScaleFactor: 1 as const,
+  };
+}
 
 async function waitForRenderReady(page: puppeteer.Page) {
   await page.waitForFunction(
@@ -107,15 +135,16 @@ export async function renderVideo(
   );
   const outputPath = path.join(tempDir, "output.mp4");
   const startedAt = Date.now();
+  const viewport = getViewportConfig();
 
   console.log({
     ts: new Date().toISOString(),
     level: "info",
     event: "video_export.render_started",
     giftCode: job.giftCode,
-    renderUrl: job.renderUrl,
-    width: VIDEO_EXPORT_WIDTH,
-    height: VIDEO_EXPORT_HEIGHT,
+    renderUrl: getRenderUrl(job.giftCode),
+    width: viewport.width,
+    height: viewport.height,
     fps: VIDEO_EXPORT_FPS,
     tempDir,
   });
@@ -130,17 +159,34 @@ export async function renderVideo(
       level: "info",
       event: "video_export.viewport_config",
       giftCode: job.giftCode,
-      width: VIDEO_EXPORT_WIDTH,
-      height: VIDEO_EXPORT_HEIGHT,
+      width: viewport.width,
+      height: viewport.height,
       fps: VIDEO_EXPORT_FPS,
     });
 
     await onProgress?.(0);
-    await page.setViewport({
-      width: VIDEO_EXPORT_WIDTH,
-      height: VIDEO_EXPORT_HEIGHT,
-      deviceScaleFactor: 1,
-    });
+    try {
+      await page.setViewport(viewport);
+    } catch (error) {
+      console.error({
+        ts: new Date().toISOString(),
+        level: "error",
+        event: "video_export.viewport_config_failed",
+        giftCode: job.giftCode,
+        viewport,
+        rawWidth: VIDEO_EXPORT_WIDTH,
+        rawHeight: VIDEO_EXPORT_HEIGHT,
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : { message: String(error) },
+      });
+      throw error;
+    }
 
     const navigationStartedAt = Date.now();
     console.log({
@@ -148,9 +194,9 @@ export async function renderVideo(
       level: "info",
       event: "video_export.render_navigate_started",
       giftCode: job.giftCode,
-      renderUrl: job.renderUrl,
+      renderUrl: getRenderUrl(job.giftCode),
     });
-    await page.goto(job.renderUrl, {
+    await page.goto(getRenderUrl(job.giftCode), {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
     });
@@ -335,8 +381,15 @@ export async function renderVideo(
       level: "error",
       event: "video_export.render_failed",
       giftCode: job.giftCode,
-      error: error instanceof Error ? error.message : String(error),
       renderDurationSec: utils.seconds(Date.now() - startedAt),
+      error:
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+            }
+          : { message: String(error) },
     });
     throw error;
   } finally {

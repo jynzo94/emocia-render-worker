@@ -21,6 +21,42 @@ console.log({
   fps: VIDEO_EXPORT_FPS,
 });
 
+process.on("uncaughtException", async (error) => {
+  console.error({
+    ts: new Date().toISOString(),
+    level: "error",
+    event: "video_export.uncaught_exception",
+    error:
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : { message: String(error) },
+  });
+  await worker.close().catch(() => undefined);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", async (reason) => {
+  console.error({
+    ts: new Date().toISOString(),
+    level: "error",
+    event: "video_export.unhandled_rejection",
+    error:
+      reason instanceof Error
+        ? {
+            name: reason.name,
+            message: reason.message,
+            stack: reason.stack,
+          }
+        : { message: String(reason) },
+  });
+  await worker.close().catch(() => undefined);
+  process.exit(1);
+});
+
 await resetInterruptedVideoExportsOnStartup();
 await worker.run();
 

@@ -35,17 +35,12 @@ export async function uploadVideoObject(params: {
     }),
   );
 
-  const downloadUrl = `${config.videoExportsBaseUrl}/${params.objectKey}`;
-
   console.log({
     ts: new Date().toISOString(),
     level: "info",
     event: "video_export.upload_completed",
     objectKey: params.objectKey,
     bytes: params.body.byteLength,
-    downloadUrl,
     durationSec: utils.seconds(Date.now() - startedAt),
   });
-
-  return downloadUrl;
 }
