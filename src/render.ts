@@ -32,8 +32,8 @@ function toLogError(error: unknown) {
     : { message: String(error) };
 }
 
-function getRenderUrl(giftCode: string) {
-  return `${config.appBaseUrl}/gift/${encodeURIComponent(giftCode)}?export=1`;
+function getRenderUrl(cardCode: string) {
+  return `${config.appBaseUrl}/card/${encodeURIComponent(cardCode)}?export=1`;
 }
 
 function getViewportConfig() {
@@ -101,7 +101,7 @@ function attachPageLogging(page: puppeteer.Page, job: RenderVideoJob) {
     //   ts: new Date().toISOString(),
     //   level: msg.type() === "error" ? "error" : "info",
     //   event: "video_export.browser_console",
-    //   giftCode: job.giftCode,
+    //   cardCode: job.cardCode,
     //   consoleType: msg.type(),
     //   text: msg.text(),
     //   args,
@@ -114,7 +114,7 @@ function attachPageLogging(page: puppeteer.Page, job: RenderVideoJob) {
       ts: new Date().toISOString(),
       level: "error",
       event: "video_export.browser_pageerror",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       error: toLogError(error),
     });
   });
@@ -124,7 +124,7 @@ function attachPageLogging(page: puppeteer.Page, job: RenderVideoJob) {
       ts: new Date().toISOString(),
       level: "error",
       event: "video_export.browser_request_failed",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       url: request.url(),
       method: request.method(),
       resourceType: request.resourceType(),
@@ -156,7 +156,7 @@ function attachPageLogging(page: puppeteer.Page, job: RenderVideoJob) {
       ts: new Date().toISOString(),
       level: "error",
       event: "video_export.browser_bad_response",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       url: response.url(),
       status,
       resourceType: request.resourceType(),
@@ -194,7 +194,7 @@ async function dumpRenderFailureArtifacts(params: {
       ts: new Date().toISOString(),
       level: "error",
       event: "video_export.render_failure_state",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       renderState,
       url: page.url(),
       title: await page.title().catch(() => undefined),
@@ -207,7 +207,7 @@ async function dumpRenderFailureArtifacts(params: {
           ts: new Date().toISOString(),
           level: "error",
           event: "video_export.render_failure_screenshot_saved",
-          giftCode: job.giftCode,
+          cardCode: job.cardCode,
           screenshotPath,
         });
       })
@@ -216,7 +216,7 @@ async function dumpRenderFailureArtifacts(params: {
           ts: new Date().toISOString(),
           level: "error",
           event: "video_export.render_failure_screenshot_failed",
-          giftCode: job.giftCode,
+          cardCode: job.cardCode,
           error: toLogError(error),
         });
       });
@@ -229,7 +229,7 @@ async function dumpRenderFailureArtifacts(params: {
           ts: new Date().toISOString(),
           level: "error",
           event: "video_export.render_failure_html_saved",
-          giftCode: job.giftCode,
+          cardCode: job.cardCode,
           htmlPath,
         });
       })
@@ -238,7 +238,7 @@ async function dumpRenderFailureArtifacts(params: {
           ts: new Date().toISOString(),
           level: "error",
           event: "video_export.render_failure_html_failed",
-          giftCode: job.giftCode,
+          cardCode: job.cardCode,
           error: toLogError(error),
         });
       });
@@ -247,7 +247,7 @@ async function dumpRenderFailureArtifacts(params: {
       ts: new Date().toISOString(),
       level: "error",
       event: "video_export.render_failure_artifacts_failed",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       error: toLogError(error),
     });
   }
@@ -315,7 +315,7 @@ export async function renderVideo(
   onProgress?: (progress: number) => Promise<void> | void,
 ) {
   const tempDir = await mkdtemp(
-    path.join(tmpdir(), `emocia-render-${job.giftCode}-`),
+    path.join(tmpdir(), `emocia-render-${job.cardCode}-`),
   );
   const outputPath = path.join(tempDir, "output.mp4");
   const startedAt = Date.now();
@@ -325,8 +325,8 @@ export async function renderVideo(
     ts: new Date().toISOString(),
     level: "info",
     event: "video_export.render_started",
-    giftCode: job.giftCode,
-    renderUrl: getRenderUrl(job.giftCode),
+    cardCode: job.cardCode,
+    renderUrl: getRenderUrl(job.cardCode),
     width: viewport.width,
     height: viewport.height,
     fps: VIDEO_EXPORT_FPS,
@@ -343,7 +343,7 @@ export async function renderVideo(
       ts: new Date().toISOString(),
       level: "info",
       event: "video_export.viewport_config",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       width: viewport.width,
       height: viewport.height,
       fps: VIDEO_EXPORT_FPS,
@@ -357,7 +357,7 @@ export async function renderVideo(
         ts: new Date().toISOString(),
         level: "error",
         event: "video_export.viewport_config_failed",
-        giftCode: job.giftCode,
+        cardCode: job.cardCode,
         viewport,
         rawWidth: VIDEO_EXPORT_WIDTH,
         rawHeight: VIDEO_EXPORT_HEIGHT,
@@ -378,10 +378,10 @@ export async function renderVideo(
       ts: new Date().toISOString(),
       level: "info",
       event: "video_export.render_navigate_started",
-      giftCode: job.giftCode,
-      renderUrl: getRenderUrl(job.giftCode),
+      cardCode: job.cardCode,
+      renderUrl: getRenderUrl(job.cardCode),
     });
-    await page.goto(getRenderUrl(job.giftCode), {
+    await page.goto(getRenderUrl(job.cardCode), {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
     });
@@ -389,7 +389,7 @@ export async function renderVideo(
       ts: new Date().toISOString(),
       level: "info",
       event: "video_export.render_navigate_completed",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       durationSec: utils.seconds(Date.now() - navigationStartedAt),
     });
 
@@ -402,7 +402,7 @@ export async function renderVideo(
       ts: new Date().toISOString(),
       level: "info",
       event: "video_export.render_ready",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       durationSec: utils.seconds(ready.durationMs),
       progress: ready.progress,
       estimatedTotalFrames: Math.max(
@@ -454,7 +454,7 @@ export async function renderVideo(
       ts: new Date().toISOString(),
       level: "info",
       event: "video_export.frame_capture_started",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       totalFrames,
       durationSec: utils.seconds(ready.durationMs),
       fps: VIDEO_EXPORT_FPS,
@@ -501,7 +501,7 @@ export async function renderVideo(
           ts: new Date().toISOString(),
           level: "info",
           event: "video_export.frame_capture_progress",
-          giftCode: job.giftCode,
+          cardCode: job.cardCode,
           processedFrames,
           totalFrames,
           progressPercent: Math.round((processedFrames / totalFrames) * 100),
@@ -532,7 +532,7 @@ export async function renderVideo(
       ts: new Date().toISOString(),
       level: "info",
       event: "video_export.frame_capture_completed",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       totalFrames,
       streamingTo: "ffmpeg.stdin",
       durationSec: utils.seconds(frameCaptureDurationMs),
@@ -550,7 +550,7 @@ export async function renderVideo(
       ts: new Date().toISOString(),
       level: "info",
       event: "video_export.ffmpeg_started",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       outputPath,
       mode: "image2pipe",
     });
@@ -562,7 +562,7 @@ export async function renderVideo(
       ts: new Date().toISOString(),
       level: "info",
       event: "video_export.ffmpeg_completed",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       outputPath,
       bytes: outputBuffer.byteLength,
       durationSec: utils.seconds(Date.now() - ffmpegStartedAt),
@@ -580,7 +580,7 @@ export async function renderVideo(
       ts: new Date().toISOString(),
       level: "error",
       event: "video_export.render_failed",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       renderDurationSec: utils.seconds(Date.now() - startedAt),
       error: toLogError(error),
     });
@@ -592,7 +592,7 @@ export async function renderVideo(
       ts: new Date().toISOString(),
       level: "info",
       event: "video_export.render_cleanup_completed",
-      giftCode: job.giftCode,
+      cardCode: job.cardCode,
       tempDir,
       renderDurationSec: utils.seconds(Date.now() - startedAt),
     });

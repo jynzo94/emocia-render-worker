@@ -1,5 +1,5 @@
 export type RenderVideoJob = {
-  giftCode: string
+  cardCode: string
 }
 
 type RenderStatus = 'idle' | 'ready' | 'started' | 'finished'

@@ -13,8 +13,8 @@ import { uploadVideoObject } from "./storage.js";
 import type { RenderVideoJob } from "./types.js";
 import { utils } from "./utils.js";
 
-function getVideoObjectKey(giftCode: string) {
-  return `gifts/${giftCode}/video/video.mp4`;
+function getVideoObjectKey(cardCode: string) {
+  return `gifts/${cardCode}/video/video.mp4`;
 }
 
 // This Queue instance points to the same Redis-backed `video.render` queue as the Worker
@@ -37,8 +37,8 @@ function truncateError(error: unknown) {
   return message.slice(0, 500);
 }
 
-async function markGiftStatus(
-  giftCode: string,
+async function markCardStatus(
+  cardCode: string,
   update: Record<string, unknown>,
 ) {
   const gifts = await getGiftsCollection();
@@ -46,11 +46,11 @@ async function markGiftStatus(
     ts: new Date().toISOString(),
     level: "info",
     event: "video_export.db_status_update",
-    giftCode,
+    cardCode,
     fields: Object.keys(update),
     update,
   });
-  await gifts.updateOne({ code: giftCode }, { $set: update });
+  await gifts.updateOne({ code: cardCode }, { $set: update });
 }
 
 export async function resetInterruptedVideoExportsOnStartup() {
@@ -105,6 +105,7 @@ export const worker = new Worker<RenderVideoJob>(
   async (job) => {
     const startedAt = Date.now();
     let lastReportedProgress = -1;
+    const { cardCode } = job.data;
 
     console.log({
       ts: new Date().toISOString(),
@@ -113,12 +114,12 @@ export const worker = new Worker<RenderVideoJob>(
       jobId: job.id,
       queueName: job.queueName,
       attemptsMade: job.attemptsMade,
-      giftCode: job.data.giftCode,
-      renderUrl: `${config.appBaseUrl}/gift/${encodeURIComponent(job.data.giftCode)}?export=1`,
-      outputObjectKey: getVideoObjectKey(job.data.giftCode),
+      cardCode,
+      renderUrl: `${config.appBaseUrl}/card/${encodeURIComponent(cardCode)}?export=1`,
+      outputObjectKey: getVideoObjectKey(cardCode),
     });
 
-    await markGiftStatus(job.data.giftCode, {
+    await markCardStatus(cardCode, {
       videoExportStatus: "processing",
     });
     await job.updateProgress(0);
@@ -143,19 +144,19 @@ export const worker = new Worker<RenderVideoJob>(
         level: "info",
         event: "video_export.render_buffer_ready",
         jobId: job.id,
-        giftCode: job.data.giftCode,
+        cardCode,
         bytes: videoBuffer.byteLength,
         durationSec: utils.seconds(Date.now() - renderStartedAt),
       });
 
       const uploadStartedAt = Date.now();
-      const outputObjectKey = getVideoObjectKey(job.data.giftCode);
+      const outputObjectKey = getVideoObjectKey(cardCode);
       await uploadVideoObject({
         objectKey: outputObjectKey,
         body: videoBuffer,
       });
 
-      await markGiftStatus(job.data.giftCode, {
+      await markCardStatus(cardCode, {
         videoExportStatus: "completed",
         videoExportFileKey: outputObjectKey,
       });
@@ -165,7 +166,7 @@ export const worker = new Worker<RenderVideoJob>(
         level: "info",
         event: "video_export.job_succeeded",
         jobId: job.id,
-        giftCode: job.data.giftCode,
+        cardCode,
         renderDurationSec: utils.seconds(Date.now() - renderStartedAt),
         uploadDurationSec: utils.seconds(Date.now() - uploadStartedAt),
         durationSec: utils.seconds(Date.now() - startedAt),
@@ -173,7 +174,7 @@ export const worker = new Worker<RenderVideoJob>(
 
       return { ok: true };
     } catch (error) {
-      await markGiftStatus(job.data.giftCode, {
+      await markCardStatus(cardCode, {
         videoExportStatus: "failed",
       });
 
@@ -182,7 +183,7 @@ export const worker = new Worker<RenderVideoJob>(
         level: "error",
         event: "video_export.job_marked_failed",
         jobId: job.id,
-        giftCode: job.data.giftCode,
+        cardCode,
         reason: "render_or_upload_failed",
         errorMessage: truncateError(error),
         error:
@@ -200,7 +201,7 @@ export const worker = new Worker<RenderVideoJob>(
         level: "error",
         event: "video_export.job_failed",
         jobId: job.id,
-        giftCode: job.data.giftCode,
+        cardCode,
         durationSec: utils.seconds(Date.now() - startedAt),
         error:
           error instanceof Error
@@ -228,23 +229,25 @@ export const worker = new Worker<RenderVideoJob>(
 );
 
 worker.on("completed", (job) => {
+  const { cardCode } = job.data;
   console.log({
     ts: new Date().toISOString(),
     level: "info",
     event: "video_export.job_completed",
     jobId: job.id,
-    giftCode: job.data.giftCode,
+    cardCode,
     attemptsMade: job.attemptsMade,
   });
 });
 
 worker.on("failed", async (job, error) => {
+  const cardCode = job?.data.cardCode;
   console.error({
     ts: new Date().toISOString(),
     level: "error",
     event: "video_export.worker_failed",
     jobId: job?.id,
-    giftCode: job?.data.giftCode,
+    cardCode,
     attemptsMade: job?.attemptsMade,
     error:
       error instanceof Error
